@@ -17,29 +17,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-/**
- * REST controller for the Resource Management module.
- *
- * <h3>Role-Based Access</h3>
- * <ul>
- *   <li>GET endpoints: accessible by any authenticated user (USER or ADMIN)</li>
- *   <li>POST / PUT / DELETE: ADMIN only — enforced at the interceptor level
- *       ({@code AuthInterceptor}) AND double-checked here via
- *       {@code @RequestAttribute("userRole")}</li>
- * </ul>
- *
- * <h3>Filtering (GET /api/resources)</h3>
- * All query parameters are optional and may be combined simultaneously:
- * <ul>
- *   <li>{@code type}        — filter by ResourceType enum value</li>
- *   <li>{@code minCapacity} — minimum capacity (inclusive)</li>
- *   <li>{@code location}    — case-insensitive substring match</li>
- *   <li>{@code status}      — filter by ResourceStatus</li>
- * </ul>
- *
- * <h3>Pagination (GET /api/resources/page)</h3>
- * Use the {@code /page} sub-path to get a paginated response with metadata.
- */
+
 @Slf4j
 @RestController
 @RequestMapping("/api/resources")

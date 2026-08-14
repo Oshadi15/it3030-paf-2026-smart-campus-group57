@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 const Sidebar = ({ collapsed, onToggle, mobileOpen, onMobileClose }) => {
-  const { isAdmin, logout } = useAuth();
+  const { isAdmin, isTechnician, logout } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -64,6 +64,12 @@ const Sidebar = ({ collapsed, onToggle, mobileOpen, onMobileClose }) => {
             <>
               <div className="sidebar-section-label">Admin</div>
               {adminNav.map(item => <NavItem key={item.path} item={item} />)}
+            </>
+          )}
+          {isTechnician && !isAdmin && (
+            <>
+              <div className="sidebar-section-label">Staff</div>
+              <NavItem item={{ path: '/admin', icon: '🔧', label: 'Tech Dashboard' }} />
             </>
           )}
         </nav>

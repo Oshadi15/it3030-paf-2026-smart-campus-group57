@@ -40,6 +40,8 @@ public class Ticket {
 
     /** Notes added by admin/technician when resolving the ticket. */
     private String resolutionNotes;
+    /** User id of admin/technician who marked this ticket as resolved. */
+    private String resolvedBy;
 
     @CreatedDate
     private LocalDateTime createdAt;

@@ -23,24 +23,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * REST controller for the Ticket module.
- *
- * <h3>Role-Based Access</h3>
- * <ul>
- *   <li>POST   /api/tickets                    — USER &amp; ADMIN (create ticket)</li>
- *   <li>GET    /api/tickets                    — ADMIN only (all tickets)</li>
- *   <li>GET    /api/tickets/{id}               — USER (own ticket) or ADMIN</li>
- *   <li>GET    /api/tickets/user/{id}          — USER (own) or ADMIN</li>
- *   <li>PUT    /{id}/assign                    — ADMIN only</li>
- *   <li>PUT    /{id}/status                    — ADMIN only</li>
- *   <li>PUT    /{id}/resolve                   — ADMIN only (with resolution notes)</li>
- *   <li>POST   /{id}/comments                  — USER &amp; ADMIN</li>
- *   <li>PUT    /{id}/comments/{cId}            — comment owner only</li>
- *   <li>DELETE /{id}/comments/{cId}            — owner or ADMIN</li>
- *   <li>POST   /{id}/attachments               — ticket reporter only (multipart)</li>
- * </ul>
- */
+
 @Slf4j
 @RestController
 @RequestMapping("/api/tickets")
@@ -52,7 +35,35 @@ public class TicketController {
     // Upload directory inside the running directory
     private static final String UPLOAD_DIR = "uploads/tickets/";
 
-    /** USER or ADMIN can create a ticket. */
+    /**
+     * Ticket API Endpoints (Role Summary)
+     *
+     * <pre>
+     * POST   /api/tickets                     — USER (creates own) / ADMIN
+     * PUT    /api/tickets/{id}                — USER (own) / ADMIN
+     *
+     * GET    /api/tickets                     — ADMIN / TECHNICIAN (all tickets)
+     * GET    /api/tickets/{id}                — USER (own) / ADMIN / TECHNICIAN
+     * GET    /api/tickets/user/{userId}       — USER (own) / ADMIN / TECHNICIAN
+     *
+     * PUT    /api/tickets/{id}/assign         — ADMIN only (assign to TECHNICIAN)
+     * PUT    /api/tickets/{id}/status         — ADMIN / TECHNICIAN
+     * PUT    /api/tickets/{id}/resolve        — ADMIN / TECHNICIAN
+     *
+     * POST   /api/tickets/{id}/comments       — any authenticated user
+     * PUT    /api/tickets/{id}/comments/{cId} — comment owner only
+     * DELETE /api/tickets/{id}/comments/{cId} — comment owner / ADMIN / TECHNICIAN
+     *
+     * DELETE /api/tickets/{id}                — USER (own previous: RESOLVED/CLOSED/REJECTED) / ADMIN
+     * POST   /api/tickets/{id}/delete         — same as DELETE (fallback for clients blocking DELETE)
+     *
+     * POST   /api/tickets/{id}/attachments    — ticket reporter only (multipart image upload, max 3)
+     * </pre>
+     */
+    /**
+     * Create a new ticket from the authenticated user.
+     * The reporterId is forced to the authenticated user id.
+     */
     @PostMapping
     public ResponseEntity<TicketDTO> createTicket(
             @Valid @RequestBody CreateTicketRequest request,
@@ -63,44 +74,69 @@ public class TicketController {
         return new ResponseEntity<>(created, HttpStatus.CREATED);
     }
 
-    /** ADMIN only — view all tickets. */
+    /**
+     * Update an existing ticket.
+     * The reporterId is verified in the service layer.
+     */
+    @PutMapping("/{id}")
+    public ResponseEntity<TicketDTO> updateTicket(
+            @PathVariable String id,
+            @Valid @RequestBody CreateTicketRequest request,
+            @RequestHeader("X-User-Id") String requestUserId) {
+        request.setReporterId(requestUserId);
+        TicketDTO updated = ticketService.updateTicket(id, request, requestUserId);
+        return ResponseEntity.ok(updated);
+    }
+
+    /**
+     * Return all tickets for admin and technicians.
+     */
     @GetMapping
     public ResponseEntity<List<TicketDTO>> getAllTickets(
             @RequestHeader(value = "X-User-Role", defaultValue = "USER") String userRole) {
-        if (!"ADMIN".equalsIgnoreCase(userRole)) {
-            throw new UnauthorizedException("Only ADMIN can view all tickets.");
+        if (!"ADMIN".equalsIgnoreCase(userRole) && !"TECHNICIAN".equalsIgnoreCase(userRole)) {
+            throw new UnauthorizedException("Only ADMIN or TECHNICIAN can view all tickets.");
         }
         return ResponseEntity.ok(ticketService.getAllTickets());
     }
 
-    /** USER (own ticket) or ADMIN. */
+    /**
+     * Return one ticket by id. Users may only view their own tickets, admins and technicians can view any.
+     */
     @GetMapping("/{id}")
     public ResponseEntity<TicketDTO> getTicket(
             @PathVariable String id,
             @RequestHeader("X-User-Id") String requestUserId,
             @RequestHeader(value = "X-User-Role", defaultValue = "USER") String userRole) {
         TicketDTO ticket = ticketService.getTicket(id);
-        boolean isAdmin = "ADMIN".equalsIgnoreCase(userRole);
-        if (!isAdmin && !requestUserId.equals(ticket.getReporterId())) {
+        boolean isAdminOrTech = "ADMIN".equalsIgnoreCase(userRole) || "TECHNICIAN".equalsIgnoreCase(userRole);
+        // Only allow regular users to view their own tickets; admins and technicians can view any.
+        if (!isAdminOrTech && !requestUserId.equals(ticket.getReporterId())) {
             throw new UnauthorizedException("You may only view your own tickets.");
         }
         return ResponseEntity.ok(ticket);
     }
 
-    /** USER (own tickets) or ADMIN. Non-admin is restricted to their own userId. */
+    /**
+     * Return tickets for one user. Non-admin users may only fetch their own tickets.
+     */
     @GetMapping("/user/{userId}")
     public ResponseEntity<List<TicketDTO>> getUserTickets(
             @PathVariable String userId,
             @RequestHeader("X-User-Id") String requestUserId,
             @RequestHeader(value = "X-User-Role", defaultValue = "USER") String userRole) {
 
-        if (!"ADMIN".equalsIgnoreCase(userRole) && !userId.equals(requestUserId)) {
+        // Regular users may only fetch their own ticket list; admins and technicians can fetch by any user id.
+        if (!"ADMIN".equalsIgnoreCase(userRole) && !"TECHNICIAN".equalsIgnoreCase(userRole) && !userId.equals(requestUserId)) {
             throw new UnauthorizedException("You may only view your own tickets.");
         }
         return ResponseEntity.ok(ticketService.getUserTickets(userId));
     }
 
-    /** ADMIN only — assign a ticket to an admin/technician. */
+    /**
+     * Assign a ticket to a technician or admin user.
+     * Only ADMIN role may perform this action.
+     */
     @PutMapping("/{id}/assign")
     public ResponseEntity<TicketDTO> assignTicket(
             @PathVariable String id,
@@ -113,34 +149,43 @@ public class TicketController {
         return ResponseEntity.ok(ticketService.assignTicket(id, adminId));
     }
 
-    /** ADMIN only — advance ticket status. */
+    /**
+     * Advance ticket workflow status.  admin roles can use this endpoint.
+     */
     @PutMapping("/{id}/status")
     public ResponseEntity<TicketDTO> updateStatus(
             @PathVariable String id,
             @RequestParam TicketStatus status,
             @RequestParam(required = false) String reason,
+            @RequestHeader("X-User-Id") String requestUserId,
             @RequestHeader(value = "X-User-Role", defaultValue = "USER") String userRole) {
 
-        if (!"ADMIN".equalsIgnoreCase(userRole)) {
-            throw new UnauthorizedException("Only ADMIN can update ticket status.");
+        if (!"ADMIN".equalsIgnoreCase(userRole) && !"TECHNICIAN".equalsIgnoreCase(userRole)) {
+            throw new UnauthorizedException("Only ADMIN or TECHNICIAN can update ticket status.");
         }
-        return ResponseEntity.ok(ticketService.updateStatus(id, status, reason));
+        return ResponseEntity.ok(ticketService.updateStatus(id, status, reason, requestUserId, userRole));
     }
 
-    /** ADMIN only — resolve ticket with optional resolution notes. */
+    /**
+     * Mark a ticket resolved and optionally save resolution notes.
+     * Both ADMIN and TECHNICIAN may perform this.
+     */
     @PutMapping("/{id}/resolve")
     public ResponseEntity<TicketDTO> resolveTicket(
             @PathVariable String id,
             @RequestParam(required = false) String notes,
+            @RequestHeader("X-User-Id") String requestUserId,
             @RequestHeader(value = "X-User-Role", defaultValue = "USER") String userRole) {
 
-        if (!"ADMIN".equalsIgnoreCase(userRole)) {
-            throw new UnauthorizedException("Only ADMIN can resolve tickets.");
+        if (!"ADMIN".equalsIgnoreCase(userRole) && !"TECHNICIAN".equalsIgnoreCase(userRole)) {
+            throw new UnauthorizedException("Only ADMIN or TECHNICIAN can resolve tickets.");
         }
-        return ResponseEntity.ok(ticketService.resolveWithNotes(id, notes));
+        return ResponseEntity.ok(ticketService.resolveWithNotes(id, notes, requestUserId, userRole));
     }
 
-    /** USER and ADMIN can add comments. authorId is taken from auth attribute. */
+    /**
+     * Add a comment to a ticket. Any authenticated user may comment.
+     */
     @PostMapping("/{id}/comments")
     public ResponseEntity<TicketDTO> addComment(
             @PathVariable String id,
@@ -149,7 +194,9 @@ public class TicketController {
         return ResponseEntity.ok(ticketService.addComment(id, requestUserId, commentRequest.getContent()));
     }
 
-    /** Comment owner can edit their own comment. */
+    /**
+     * Edit an existing ticket comment. Only the original author may edit.
+     */
     @PutMapping("/{id}/comments/{commentId}")
     public ResponseEntity<TicketDTO> editComment(
             @PathVariable String id,
@@ -159,7 +206,9 @@ public class TicketController {
         return ResponseEntity.ok(ticketService.editComment(id, commentId, requestUserId, commentRequest.getContent()));
     }
 
-    /** Comment owner or ADMIN can delete a comment. */
+    /**
+     * Delete a comment from a ticket. Owners and admins/technicians may delete.
+     */
     @DeleteMapping("/{id}/comments/{commentId}")
     public ResponseEntity<TicketDTO> deleteComment(
             @PathVariable String id,
@@ -167,6 +216,30 @@ public class TicketController {
             @RequestHeader("X-User-Id") String requestUserId,
             @RequestHeader(value = "X-User-Role", defaultValue = "USER") String userRole) {
         return ResponseEntity.ok(ticketService.deleteComment(id, commentId, requestUserId, userRole));
+    }
+
+    /**
+     * Delete a ticket. Users may delete their own resolved/rejected tickets; admins may delete any resolved/rejected ticket.
+     */
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteTicket(
+            @PathVariable String id,
+            @RequestHeader("X-User-Id") String requestUserId,
+            @RequestHeader(value = "X-User-Role", defaultValue = "USER") String userRole) {
+        ticketService.deleteTicket(id, requestUserId, userRole);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Fallback delete endpoint for environments where DELETE is blocked.
+     */
+    @PostMapping("/{id}/delete")
+    public ResponseEntity<Void> deleteTicketViaPost(
+            @PathVariable String id,
+            @RequestHeader("X-User-Id") String requestUserId,
+            @RequestHeader(value = "X-User-Role", defaultValue = "USER") String userRole) {
+        ticketService.deleteTicket(id, requestUserId, userRole);
+        return ResponseEntity.noContent().build();
     }
 
     /**

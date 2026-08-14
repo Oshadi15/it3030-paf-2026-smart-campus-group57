@@ -25,11 +25,17 @@ public class NotificationService {
      * Internal method — called by Booking/Ticket services to create notifications.
      */
     public void createNotification(String userId, String message, NotificationType type) {
+        createNotification(userId, message, type, null, null);
+    }
+
+    public void createNotification(String userId, String message, NotificationType type, String referenceType, String referenceId) {
         log.debug("Creating notification for userId={}, type={}", userId, type);
         Notification notification = Notification.builder()
                 .userId(userId)
                 .message(message)
                 .type(type)
+                .referenceType(referenceType)
+                .referenceId(referenceId)
                 .readStatus(false)
                 .build();
         notificationRepository.save(notification);
@@ -82,6 +88,8 @@ public class NotificationService {
         dto.setUserId(notification.getUserId());
         dto.setMessage(notification.getMessage());
         dto.setType(notification.getType());
+        dto.setReferenceType(notification.getReferenceType());
+        dto.setReferenceId(notification.getReferenceId());
         dto.setReadStatus(notification.getReadStatus());
         dto.setCreatedAt(notification.getCreatedAt());
         return dto;

@@ -21,6 +21,8 @@ public class Notification {
     private String userId;
     private String message;
     private NotificationType type;
+    private String referenceType;
+    private String referenceId;
     private Boolean readStatus;
 
     @CreatedDate

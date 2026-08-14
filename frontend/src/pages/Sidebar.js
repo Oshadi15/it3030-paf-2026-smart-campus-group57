@@ -1,11 +1,29 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { apiService } from '../services/api';
 import './Sidebar.css';
 
 const Sidebar = ({ collapsed, onToggle, mobileOpen, onMobileClose }) => {
-  const { isAdmin, logout } = useAuth();
+  const { user, isAdmin, isTechnician, logout } = useAuth();
   const navigate = useNavigate();
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Poll for unread notifications every 30 seconds
+  useEffect(() => {
+    if (!user?.userId) return;
+    const load = () => {
+      apiService.getUserNotifications(user.userId)
+        .then(res => {
+          const list = Array.isArray(res.data) ? res.data : [];
+          setUnreadCount(list.filter(n => !n.readStatus).length);
+        })
+        .catch(() => {});
+    };
+    load();
+    const interval = setInterval(load, 30000);
+    return () => clearInterval(interval);
+  }, [user?.userId]);
 
   const handleLogout = () => {
     logout();
@@ -14,15 +32,21 @@ const Sidebar = ({ collapsed, onToggle, mobileOpen, onMobileClose }) => {
 
   const userNav = [
     { path: '/',              icon: '⊞',  label: 'Dashboard',      end: true },
-    { path: '/my-bookings',   icon: '📅', label: 'My Bookings' },
-    { path: '/resources',     icon: '🏛',  label: 'Resources' },
+    ...(!isTechnician ? [
+      { path: '/my-bookings', icon: '📅', label: 'My Bookings' },
+      { path: '/resources',   icon: '🏛',  label: 'Resources' },
+    ] : []),
     { path: '/tickets',       icon: '🎫', label: 'Tickets' },
-    { path: '/notifications', icon: '🔔', label: 'Notifications' },
+    { path: '/notifications', icon: '🔔', label: 'Notifications', badge: unreadCount },
   ];
 
   const adminNav = [
     { path: '/admin',            icon: '⚡', label: 'Admin Dashboard' },
     { path: '/resources/manage', icon: '🔧', label: 'Manage Resources' },
+  ];
+
+  const techNav = [
+    { path: '/tech', icon: '🛠️', label: 'Tech Dashboard' },
   ];
 
   const NavItem = ({ item }) => (
@@ -35,6 +59,9 @@ const Sidebar = ({ collapsed, onToggle, mobileOpen, onMobileClose }) => {
     >
       <span className="sidebar-icon">{item.icon}</span>
       <span className="sidebar-label">{item.label}</span>
+      {item.badge > 0 && (
+        <span className="sidebar-badge">{item.badge > 99 ? '99+' : item.badge}</span>
+      )}
     </NavLink>
   );
 
@@ -67,11 +94,17 @@ const Sidebar = ({ collapsed, onToggle, mobileOpen, onMobileClose }) => {
               {adminNav.map(item => <NavItem key={item.path} item={item} />)}
             </>
           )}
+
+          {isTechnician && !isAdmin && (
+            <>
+              <div className="sidebar-section-label">Staff</div>
+              {techNav.map(item => <NavItem key={item.path} item={item} />)}
+            </>
+          )}
         </nav>
 
         {/* Footer: Logout + Collapse */}
         <div className="sidebar-footer">
-          {/* Logout button */}
           <button
             className={`sidebar-logout${collapsed ? ' collapsed' : ''}`}
             onClick={handleLogout}
@@ -81,7 +114,6 @@ const Sidebar = ({ collapsed, onToggle, mobileOpen, onMobileClose }) => {
             {!collapsed && <span>Logout</span>}
           </button>
 
-          {/* Collapse toggle */}
           <button
             className="sidebar-toggle"
             onClick={onToggle}

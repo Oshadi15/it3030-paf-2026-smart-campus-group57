@@ -49,11 +49,21 @@ public class AuthInterceptor implements HandlerInterceptor {
             }
         }
 
-        // Coarse guard: workflow state transitions require ADMIN
+        // Coarse guard: workflow state transitions
         if (path.contains("/approve") || path.contains("/reject") ||
-            path.contains("/assign")  || path.contains("/status")) {
-            if (!"ADMIN".equals(userRole)) {
-                throw new UnauthorizedException("Only ADMIN can perform this action.");
+            path.contains("/assign")  || path.contains("/status") || path.contains("/resolve")) {
+            if (path.startsWith("/api/tickets")) {
+                if (path.contains("/assign")) {
+                    if (!"ADMIN".equals(userRole)) {
+                        throw new UnauthorizedException("Only ADMIN can assign tickets.");
+                    }
+                } else if (!"ADMIN".equals(userRole) && !"TECHNICIAN".equals(userRole)) {
+                    throw new UnauthorizedException("Only ADMIN or TECHNICIAN can modify tickets.");
+                }
+            } else {
+                if (!"ADMIN".equals(userRole)) {
+                    throw new UnauthorizedException("Only ADMIN can perform this action.");
+                }
             }
         }
 

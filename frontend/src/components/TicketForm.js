@@ -1,12 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { apiService } from '../services/api';
 import { useAuth }    from '../contexts/AuthContext';
+import './TicketForm.css';
 
-const TicketForm = ({ onSuccess }) => {
+const TicketForm = ({ onSuccess, onCancel, initialData }) => {
   const { user } = useAuth();
   const [resources, setResources] = useState([]);
   const [form, setForm] = useState({
-    category: '', priority: '', description: '', resourceId: '', preferredContactDetails: '',
+    category: initialData?.category || '',
+    priority: initialData?.priority || '',
+    description: initialData?.description || '',
+    resourceId: initialData?.resourceId || '',
+    preferredContactDetails: initialData?.preferredContactDetails || '',
   });
   const [files,    setFiles]    = useState([]);
   const [errors,   setErrors]   = useState({});
@@ -14,54 +19,87 @@ const TicketForm = ({ onSuccess }) => {
   const [apiError, setApiError] = useState('');
   const fileRef = useRef(null);
 
+  // Load available resources once so user can optionally link a ticket.
   useEffect(() => {
     apiService.getResources()
       .then(res => setResources(res.data))
       .catch(() => {});
   }, []);
 
+  // Validate the ticket form fields before submission.
+  // Ensures required fields are present, description length is sufficient,
+  // and optional phone contact is normalized to 10 digits.
   const validate = () => {
     const e = {};
     if (!form.category)           e.category    = 'Category is required.';
     if (!form.priority)           e.priority    = 'Priority is required.';
     if (!form.description.trim()) e.description = 'Description is required.';
+    if (form.description.trim().length < 3)  e.description = 'Description should be at least 3 characters.';
+    if (form.preferredContactDetails && !/^\d{10}$/.test(form.preferredContactDetails)) {
+      e.preferredContactDetails = 'Phone number must be exactly 10 digits.';
+    }
     if (files.length > 3)         e.files       = 'Maximum 3 images allowed.';
     return e;
   };
 
+  // Update form values and sanitize phone input to numeric 10-digit format.
   const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    if (name === 'preferredContactDetails') {
+      const digitsOnly = value.replace(/\D/g, '').slice(0, 10);
+      setForm({ ...form, [name]: digitsOnly });
+      setErrors({ ...errors, [name]: '' });
+      setApiError('');
+      return;
+    }
+    setForm({ ...form, [name]: value });
     setErrors({ ...errors, [e.target.name]: '' });
     setApiError('');
   };
 
+  // Handle image attachment selection (max 3 files).
   const handleFileChange = (e) => {
     const selected = Array.from(e.target.files);
     if (selected.length > 3) { setErrors({ ...errors, files: 'Maximum 3 images allowed.' }); return; }
+    if (selected.some(file => file.size > 5 * 1024 * 1024)) {
+      setErrors({ ...errors, files: 'Each image must be 5MB or less.' });
+      return;
+    }
     setFiles(selected);
     setErrors({ ...errors, files: '' });
   };
 
+  // Remove one selected attachment preview.
   const handleRemoveFile = (index) => setFiles(files.filter((_, i) => i !== index));
 
+  // Submit ticket first, then upload selected attachments for the created ticket.
   const handleSubmit = async (e) => {
     e.preventDefault();
     const ve = validate();
     if (Object.keys(ve).length > 0) { setErrors(ve); return; }
     setLoading(true);
     try {
-      const res = await apiService.createTicket({
+      let newTicketId = null;
+      const payload = {
         reporterId:  user.userId,
         category:    form.category,
         priority:    form.priority,
         description: form.description,
         preferredContactDetails: form.preferredContactDetails,
         ...(form.resourceId ? { resourceId: form.resourceId } : {}),
-      });
+      };
 
-      if (files.length > 0 && res.data?.id) {
+      if (initialData?.id) {
+        await apiService.updateTicket(initialData.id, payload);
+        newTicketId = initialData.id;
+      } else {
+        const res = await apiService.createTicket(payload);
+        newTicketId = res.data?.id;
+      }
+
+      if (files.length > 0 && newTicketId) {
         for (const file of files) {
-          await apiService.uploadTicketAttachment(res.data.id, file);
+          await apiService.uploadTicketAttachment(newTicketId, file);
         }
       }
 
@@ -76,13 +114,21 @@ const TicketForm = ({ onSuccess }) => {
     }
   };
 
-  const isFormValid = form.category && form.priority && form.description.trim();
+  // Keep submit button disabled until required fields are filled with valid shape.
+  // Enable submit as soon as required fields are non-empty; full validation runs on submit.
+  const isFormValid = !!(form.category && form.priority && form.description.trim().length >= 3);
+  const descriptionChars = form.description?.length || 0;
 
   return (
-    <form onSubmit={handleSubmit}>
-      <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 20 }}>
-        🎫 Submit New Ticket
-      </h3>
+    <form onSubmit={handleSubmit} className="ticket-form">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 className="ticket-form-title">
+          {initialData ? '✏️ Update Ticket' : '🎫 Submit New Ticket'}
+        </h3>
+        {onCancel && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel}>✕ Cancel</button>
+        )}
+      </div>
 
       {apiError && <div className="alert alert-error">{apiError}</div>}
 
@@ -126,7 +172,10 @@ const TicketForm = ({ onSuccess }) => {
 
       {/* Description */}
       <div className="form-group">
-        <label className="form-label">Description *</label>
+        <label className="form-label">
+          Description *
+          <span className="ticket-form-hint">{descriptionChars}/800</span>
+        </label>
         <textarea
           name="description"
           value={form.description}
@@ -135,6 +184,7 @@ const TicketForm = ({ onSuccess }) => {
           rows={4}
           placeholder="Describe the issue in detail — what happened, where, when…"
           id="ticket-description"
+          maxLength={800}
         />
         {errors.description && <span className="validation-error">{errors.description}</span>}
       </div>
@@ -143,19 +193,22 @@ const TicketForm = ({ onSuccess }) => {
       <div className="form-group">
         <label className="form-label">Preferred Contact Details <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(optional)</span></label>
         <input
-          type="text"
+          type="tel"
           name="preferredContactDetails"
           value={form.preferredContactDetails}
           onChange={handleChange}
           className="form-input"
-          placeholder="e.g., Phone number or alternative email"
+          placeholder="Enter 10-digit phone number"
+          inputMode="numeric"
+          maxLength={10}
           id="ticket-contact-details"
         />
+        {errors.preferredContactDetails && <span className="validation-error">{errors.preferredContactDetails}</span>}
       </div>
 
       {/* Attachments */}
       <div className="form-group">
-        <label className="form-label">📷 Attachments <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(optional, max 3 images)</span></label>
+        <label className="form-label">📷 Attachments <span className="ticket-form-optional">(optional, max 3 images)</span></label>
         <input
           ref={fileRef}
           type="file"
@@ -163,38 +216,24 @@ const TicketForm = ({ onSuccess }) => {
           multiple
           onChange={handleFileChange}
           id="ticket-attachments"
-          style={{
-            display: 'block', padding: '10px 14px',
-            border: '1px dashed var(--border-strong)',
-            borderRadius: 'var(--radius-md)',
-            width: '100%', cursor: 'pointer',
-            background: 'var(--glass-bg)',
-            color: 'var(--text-secondary)',
-            fontSize: '0.84rem',
-          }}
+          className="ticket-file-input"
         />
         {errors.files && <span className="validation-error">{errors.files}</span>}
 
         {/* Preview thumbnails */}
         {files.length > 0 && (
-          <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div className="ticket-file-preview-list">
             {files.map((file, i) => (
-              <div key={i} style={{ position: 'relative', display: 'inline-block', borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border)' }}>
+              <div key={i} className="ticket-file-preview-item">
                 <img
                   src={URL.createObjectURL(file)}
                   alt={`preview-${i}`}
-                  style={{ width: 80, height: 80, objectFit: 'cover', display: 'block' }}
+                  className="ticket-file-preview-img"
                 />
                 <button
                   type="button"
                   onClick={() => handleRemoveFile(i)}
-                  style={{
-                    position: 'absolute', top: 3, right: 3,
-                    background: 'rgba(0,0,0,0.75)', color: 'white',
-                    border: 'none', borderRadius: '50%',
-                    width: 20, height: 20, cursor: 'pointer',
-                    fontSize: '0.65rem', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}
+                  className="ticket-file-remove-btn"
                 >✕</button>
               </div>
             ))}
@@ -202,20 +241,35 @@ const TicketForm = ({ onSuccess }) => {
         )}
       </div>
 
-      <button
-        type="submit"
-        className="btn btn-primary"
-        disabled={!isFormValid || loading}
-        style={{ width: '100%', padding: '12px' }}
-        id="ticket-submit-btn"
-      >
-        {loading ? (
-          <>
-            <span className="spin" style={{ width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTop: '2px solid white', borderRadius: '50%', display: 'inline-block' }} />
-            Submitting…
-          </>
-        ) : '📤 Submit Ticket'}
-      </button>
+      <div className="ticket-form-actions">
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => {
+            setForm({ category: '', priority: '', description: '', resourceId: '', preferredContactDetails: '' });
+            setFiles([]);
+            setErrors({});
+            setApiError('');
+            if (fileRef.current) fileRef.current.value = '';
+          }}
+          disabled={loading}
+        >
+          Reset
+        </button>
+        <button
+          type="submit"
+          className="btn btn-primary"
+          disabled={loading}
+          id="ticket-submit-btn"
+        >
+          {loading ? (
+            <>
+              <span className="spin ticket-submit-spin" />
+              {initialData ? 'Updating…' : 'Submitting…'}
+            </>
+          ) : (initialData ? '💾 Update Ticket' : '📤 Submit Ticket')}
+        </button>
+      </div>
     </form>
   );
 };

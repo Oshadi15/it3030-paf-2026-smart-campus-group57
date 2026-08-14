@@ -7,14 +7,14 @@ import { useAuth } from '../contexts/AuthContext';
  * Optionally requires admin role via requireAdmin prop.
  */
 const ProtectedRoute = ({ children, requireAdmin = false }) => {
-  const { isLoggedIn, isAdmin } = useAuth();
+  const { isLoggedIn, isAdmin, isTechnician } = useAuth();
   const location = useLocation();
 
   if (!isLoggedIn) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  if (requireAdmin && !isAdmin) {
+  if (requireAdmin && !isAdmin && !isTechnician) {
     return (
       <div className="access-denied-page">
         <div style={{ fontSize: '3.5rem', marginBottom: 16 }}>🔒</div>
