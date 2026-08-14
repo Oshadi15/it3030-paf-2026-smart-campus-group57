@@ -58,7 +58,7 @@ const LoginPage = () => {
   };
 
   const handleError = () =>
-    setError('Google sign-in failed or was cancelled. Ensure http://localhost:3000 is in Authorized JavaScript Origins.');
+    setError('Google sign-in failed or was cancelled. Ensure http://localhost:3001 is in Authorized JavaScript Origins.');
 
   return (
     <div className="login-page">
