@@ -94,7 +94,7 @@ public class AdminController {
         user.setRole(parseRoleOrThrow(role));
         return ResponseEntity.ok(userRepository.save(user));
     }
-
+    //commented out delete user endpoint to prevent accidental deletion of users
     private void requireAdmin(String userRole) {
         if (!"ADMIN".equals(userRole)) {
             throw new UnauthorizedException("Only ADMIN can access users.");
